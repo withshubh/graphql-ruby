@@ -212,4 +212,56 @@ describe GraphQL::Schema::Interface do
       assert_equal('not 42', InterfaceE.some_method)
     end
   end
+
+  describe "implementing fields with method" do
+    class MethodTestSchema < GraphQL::Schema
+      module HasName
+        include GraphQL::Schema::Interface
+        field :name, String, null: false
+      end
+
+      class Query < GraphQL::Schema::Object
+        implements HasName
+
+        def name
+          "root query type"
+        end
+
+        field :has_name, HasName, null: false
+
+        def has_name
+          self
+        end
+      end
+
+      query(Query)
+
+      def self.resolve_type(abs_type, obj, ctx)
+        Query
+      end
+
+      use GraphQL::Execution::Interpreter
+      use GraphQL::Analysis::AST
+    end
+
+    it "uses methods from the object type" do
+      res = MethodTestSchema.execute <<-GRAPHQL
+      {
+        name1: name
+
+        ... on HasName {
+          name2: name
+        }
+
+        hasName {
+          name3: name
+        }
+      }
+      GRAPHQL
+
+      assert_equal "root query type", res["data"]["name1"]
+      assert_equal "root query type", res["data"]["name2"]
+      assert_equal "root query type", res["data"]["hasName"]["name3"]
+    end
+  end
 end
