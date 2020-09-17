@@ -221,8 +221,6 @@ module GraphQL
           line_incr = value.count("\n")
           value = GraphQL::Language::BlockString.trim_whitespace(value)
         end
-        # TODO: replace with `String#match?` when we support only Ruby 2.4+
-        # (It's faster: https://bugs.ruby-lang.org/issues/8110)
         if !value.valid_encoding? || !value.match?(VALID_STRING)
           meta[:tokens] << token = GraphQL::Language::Token.new(
             :BAD_UNICODE_ESCAPE,

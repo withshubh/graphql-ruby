@@ -2,6 +2,22 @@
 module GraphQL
   module Language
     module BlockString
+      # Precompile some of these, but don't
+      # accept new entries or else user input could make an ever-expanding hash.
+      REPLACE_REGEXPS = {}
+      TRAILING_REGEXPS = {}
+      LEADING_REGEXPS = {}
+
+      1.upto(10) do |i|
+        REPLACE_REGEXPS[i] = Regexp.compile("^ {#{i}}")
+        TRAILING_REGEXPS[i] = Regexp.compile('\A(?:\n +|^ +\n)+', Regexp::MULTILINE)
+        LEADING_REGEXPS[i] = Regexp.compile('(?:\n *)+\Z', Regexp::MULTILINE)
+      end
+
+      REPLACE_REGEXPS.freeze
+      TRAILING_REGEXPS.freeze
+      LEADING_REGEXPS.freeze
+
       # Remove leading and trailing whitespace from a block string.
       # See "Block Strings" in https://github.com/facebook/graphql/blob/master/spec/Section%202%20--%20Language.md
       def self.trim_whitespace(str)
@@ -12,52 +28,61 @@ module GraphQL
           return str
         end
 
-        lines = has_newline ? str.split("\n") : [str]
         common_indent = nil
-
-        # find the common whitespace
-        lines.each_with_index do |line, idx|
-          if idx == 0
-            next
-          end
-          line_length = line.size
-          line_indent = if line.match?(/\A  [^ ]/)
-            2
-          elsif line.match?(/\A    [^ ]/)
-            4
-          elsif line.match?(/\A[^ ]/)
-            0
-          else
-            line[/\A */].size
-          end
-          if line_indent < line_length && (common_indent.nil? || line_indent < common_indent)
-            common_indent = line_indent
-          end
-        end
-
-        # Remove the common whitespace
-        if common_indent && common_indent > 0
-          lines.each_with_index do |line, idx|
-            if idx == 0
-              next
-            else
-              line.slice!(0, common_indent)
+        current_indent = 0
+        current_length = 0
+        begin_line = true
+        first_line = true
+        str.each_codepoint do |ord|
+          case ord
+          when 10 # "\n"
+            if first_line
+              first_line = false
+            elsif current_indent < current_length && (common_indent.nil? || current_indent < common_indent)
+              common_indent = current_indent
             end
+            begin_line = true
+            current_indent = 0
+            current_length = 0
+          when 32 # " "
+            if begin_line
+              current_indent += 1
+            end
+            current_length += 1
+          else
+            begin_line = false
+            current_length += 1
           end
         end
 
-        # Remove leading & trailing blank lines
-        while lines.size > 0 &&
-          lines[0].empty?
-          lines.shift
-        end
-        while lines.size > 0 &&
-          lines[-1].empty?
-          lines.pop
+        replace_regexp = if common_indent && common_indent > 0
+          REPLACE_REGEXPS[common_indent] || Regexp.compile("^ {0,#{common_indent}}")
+        else
+          nil
         end
 
-        # Rebuild the string
-        lines.size > 1 ? lines.join("\n") : (lines.first || "")
+        # We're gonna modify the string, dup it if need be
+        if str.frozen? && (str.start_with?("\n") || str.end_with?("\n") || (replace_regexp && str.match?(replace_regexp)))
+          str = str.dup
+        end
+
+        # Replace common whitespace
+        if replace_regexp
+          str.gsub!(replace_regexp, "")
+        end
+        # Remove leading & trailing blank lines
+        leading_replace_regexp = LEADING_REGEXPS[common_indent] || Regexp.compile('\A(?:\n {0,' + common_indent.to_s + '})+', Regexp::MULTILINE)
+        trailing_replace_regexp = TRAILING_REGEXPS[common_indent] || Regexp.compile('(?:\n {0,' + common_indent.to_s + '})+\Z', Regexp::MULTILINE)
+
+        res = nil
+        while (res = str.slice!(leading_replace_regexp))
+        end
+
+        while (res = str.slice!(trailing_replace_regexp))
+        end
+
+
+        str
       end
 
       def self.print(str, indent: '')
